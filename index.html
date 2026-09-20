@@ -1,10 +1,260 @@
-<!DOCTYPE html>
-<html>
+
+<!doctype html>
+<html lang="en">
 <head>
-  <title>Car Racing Game</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Car Racing Game</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#071522;font-family:Arial,sans-serif;touch-action:none}
+#game{position:fixed;inset:0;width:100%;height:100%;display:block}
+#hud{position:fixed;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;z-index:5}
+.h{background:#06111dcc;border:1px solid #ffffff33;border-radius:14px;padding:10px 14px;color:white;font-weight:800}
+#nitro{position:fixed;top:62px;left:50%;transform:translateX(-50%);width:52%;max-width:300px;height:10px;background:#26384b;border-radius:20px;z-index:5;overflow:hidden}
+#nitro i{display:block;width:100%;height:100%;background:linear-gradient(90deg,#00d9ff,#735cff,#ff3b86)}
+#menu{position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;z-index:10}
+.card{width:min(390px,88vw);padding:28px 20px;text-align:center;border-radius:24px;background:#101d2d;border:1px solid #ffffff33;color:white;box-shadow:0 20px 70px #000}
+.card h1{margin:0 0 8px;font-size:32px}
+.card p{color:#c9d7e6;line-height:1.5}
+#start{padding:14px 28px;border:0;border-radius:14px;background:linear-gradient(135deg,#00cfff,#675cff);color:white;font-weight:900;font-size:18px}
+#controls{position:fixed;left:0;right:0;bottom:22px;display:flex;justify-content:space-between;padding:0 24px;z-index:6;pointer-events:none}
+.ctrl{pointer-events:auto;width:76px;height:76px;border-radius:50%;border:1px solid #ffffff44;background:#071423dd;color:white;font-size:30px;font-weight:900}
+#tip{position:fixed;bottom:112px;left:50%;transform:translateX(-50%);z-index:5;color:#dce8f5;background:#0009;padding:7px 12px;border-radius:10px;font-size:13px}
+.hide{display:none!important}
+</style>
 </head>
 <body>
-  <h1>🏎️ Car Racing Game</h1>
-  <p>Game loading...</p>
+<canvas id="game"></canvas>
+<div id="hud">
+ <div class="h">🏁 <span id="score">0</span></div>
+ <div class="h">🪙 <span id="coins">0</span></div>
+ <div class="h">🏎️ <span id="speed">0</span> km/h</div>
+</div>
+<div id="nitro"><i id="nitroFill"></i></div>
+<div id="tip">◀ ▶ Steer &nbsp; • &nbsp; 🔥 Nitro</div>
+
+<div id="controls">
+ <button class="ctrl" id="left">◀</button>
+ <button class="ctrl" id="right">▶</button>
+ <button class="ctrl" id="boost">🔥</button>
+</div>
+
+<div id="menu">
+ <div class="card">
+  <h1>🏎️ Turbo Rush</h1>
+  <p id="msg">Dodge traffic, collect coins and use nitro.</p>
+  <button id="start">START RACE</button>
+ </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+var canvas=document.getElementById("game");
+var ctx=canvas.getContext("2d");
+var W=0,H=0,dpr=1,roadX=0,roadW=0;
+
+var state={running:false,score:0,coins:0,speed:0,nitro:100,last:0,roadOffset:0,enemyTimer:0,coinTimer:0};
+var player={lane:1,x:0,y:0,w:44,h:78,targetLane:1};
+var enemies=[];
+var coins=[];
+var boost=false;
+
+function resize(){
+ dpr=Math.min(window.devicePixelRatio||1,2);
+ W=window.innerWidth; H=window.innerHeight;
+ canvas.width=Math.floor(W*dpr); canvas.height=Math.floor(H*dpr);
+ canvas.style.width=W+"px"; canvas.style.height=H+"px";
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+ roadW=Math.min(W*0.78,520);
+ roadX=(W-roadW)/2;
+ player.y=H-180;
+ player.x=laneX(player.targetLane,player.w);
+}
+
+function laneX(lane,w){return roadX+roadW*(lane+0.5)/3-w/2}
+
+function updateHud(){
+ document.getElementById("score").textContent=Math.floor(state.score);
+ document.getElementById("coins").textContent=state.coins;
+ document.getElementById("speed").textContent=Math.floor(state.speed);
+ document.getElementById("nitroFill").style.width=Math.max(0,state.nitro)+"%";
+}
+
+function reset(){
+ state.score=0; state.coins=0; state.speed=0; state.nitro=100;
+ state.roadOffset=0; state.enemyTimer=.5; state.coinTimer=1;
+ enemies=[]; coins=[];
+ player.targetLane=1; player.lane=1; player.x=laneX(1,player.w);
+ updateHud();
+}
+
+function startGame(){
+ reset();
+ state.running=true;
+ document.getElementById("menu").classList.add("hide");
+ state.last=performance.now();
+ requestAnimationFrame(loop);
+}
+
+function endGame(){
+ state.running=false;
+ document.getElementById("msg").innerHTML="Race over! Score: <b>"+Math.floor(state.score)+"</b><br>Coins: <b>"+state.coins+"</b>";
+ document.getElementById("start").textContent="RACE AGAIN";
+ document.getElementById("menu").classList.remove("hide");
+}
+
+function move(dir){
+ if(!state.running)return;
+ player.targetLane=Math.max(0,Math.min(2,player.targetLane+dir));
+}
+
+function setBoost(v){boost=v}
+
+function addEnemy(){
+ var lane=Math.floor(Math.random()*3);
+ enemies.push({lane:lane,x:laneX(lane,42),y:-100,w:42,h:76,extra:30+Math.random()*70});
+}
+
+function addCoin(){
+ var lane=Math.floor(Math.random()*3);
+ coins.push({lane:lane,x:laneX(lane,20)+10,y:-25,r:10});
+}
+
+function overlap(a,b){
+ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;
+}
+
+function drawCar(q,color){
+ ctx.save();
+ ctx.translate(q.x+q.w/2,q.y+q.h/2);
+ ctx.fillStyle="#05070a";
+ ctx.fillRect(-q.w/2-5,-q.h*.3,7,18);
+ ctx.fillRect(q.w/2-2,-q.h*.3,7,18);
+ ctx.fillRect(-q.w/2-5,q.h*.18,7,18);
+ ctx.fillRect(q.w/2-2,q.h*.18,7,18);
+ ctx.fillStyle=color;
+ ctx.beginPath();
+ ctx.roundRect(-q.w/2,-q.h/2,q.w,q.h,9);
+ ctx.fill();
+ ctx.fillStyle="#bfe9ff";
+ ctx.beginPath();
+ ctx.roundRect(-q.w*.31,-q.h*.27,q.w*.62,q.h*.23,4);
+ ctx.fill();
+ ctx.fillStyle="#7099b5";
+ ctx.beginPath();
+ ctx.roundRect(-q.w*.28,2,q.w*.56,q.h*.18,4);
+ ctx.fill();
+ ctx.restore();
+}
+
+function drawRoad(){
+ ctx.fillStyle="#173c27"; ctx.fillRect(0,0,W,H);
+ ctx.fillStyle="#303943"; ctx.fillRect(roadX,0,roadW,H);
+ ctx.fillStyle="#e8e8df";
+ ctx.fillRect(roadX+5,0,5,H);
+ ctx.fillRect(roadX+roadW-10,0,5,H);
+
+ var dash=76, offset=state.roadOffset%dash;
+ ctx.fillStyle="#f5f5f5";
+ for(var lane=1;lane<3;lane++){
+  var xx=roadX+roadW*lane/3-3;
+  for(var y=offset-dash;y<H;y+=dash)ctx.fillRect(xx,y,6,40);
+ }
+}
+
+function drawCoin(q){
+ ctx.fillStyle="#ffd32a";
+ ctx.beginPath();ctx.arc(q.x,q.y,q.r,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#8b6200";ctx.font="bold 12px Arial";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("$",q.x,q.y);
+}
+
+function update(dt){
+ var normal=240+Math.min(state.score*.03,180);
+ var using=boost && state.nitro>0;
+ state.speed=normal+(using?170:0);
+ if(using)state.nitro=Math.max(0,state.nitro-40*dt);
+ else state.nitro=Math.min(100,state.nitro+10*dt);
+
+ state.roadOffset=(state.roadOffset+state.speed*dt)%10000;
+ state.score+=state.speed*dt*.05;
+
+ player.x += (laneX(player.targetLane,player.w)-player.x)*Math.min(1,dt*12);
+
+ state.enemyTimer-=dt;
+ state.coinTimer-=dt;
+ if(state.enemyTimer<=0){
+  addEnemy();
+  state.enemyTimer=.65+Math.random()*.65;
+ }
+ if(state.coinTimer<=0){
+  addCoin();
+  state.coinTimer=.7+Math.random()*.8;
+ }
+
+ for(var i=0;i<enemies.length;i++){
+  enemies[i].y+=(state.speed+enemies[i].extra)*dt;
+  if(overlap(player,enemies[i])){endGame();return;}
+ }
+ for(var j=coins.length-1;j>=0;j--){
+  coins[j].y+=state.speed*dt;
+  var q=coins[j];
+  var near=q.x>player.x-10&&q.x<player.x+player.w+10&&q.y>player.y-10&&q.y<player.y+player.h+10;
+  if(near){
+   coins.splice(j,1);
+   state.coins++;
+   state.score+=25;
+   state.nitro=Math.min(100,state.nitro+8);
+  }
+ }
+ enemies=enemies.filter(function(e){return e.y<H+120});
+ coins=coins.filter(function(q){return q.y<H+40});
+ updateHud();
+}
+
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ drawRoad();
+ for(var i=0;i<coins.length;i++)drawCoin(coins[i]);
+ for(var j=0;j<enemies.length;j++)drawCar(enemies[j],["#e53935","#2196f3","#ff9800"][j%3]);
+ if(boost&&state.running&&state.nitro>0){
+  ctx.fillStyle="#ff8a00";
+  ctx.beginPath();
+  ctx.moveTo(player.x+8,player.y+player.h);
+  ctx.lineTo(player.x+player.w/2,player.y+player.h+38+Math.random()*12);
+  ctx.lineTo(player.x+player.w-8,player.y+player.h);
+  ctx.fill();
+ }
+ drawCar(player,"#00d9ff");
+}
+
+function loop(now){
+ if(!state.running)return;
+ var dt=Math.min(.04,(now-state.last)/1000);
+ state.last=now;
+ update(dt);
+ draw();
+ if(state.running)requestAnimationFrame(loop);
+}
+
+document.getElementById("start").addEventListener("click",startGame);
+document.getElementById("left").addEventListener("pointerdown",function(e){e.preventDefault();move(-1)});
+document.getElementById("right").addEventListener("pointerdown",function(e){e.preventDefault();move(1)});
+document.getElementById("boost").addEventListener("pointerdown",function(e){e.preventDefault();setBoost(true)});
+document.getElementById("boost").addEventListener("pointerup",function(){setBoost(false)});
+document.getElementById("boost").addEventListener("pointercancel",function(){setBoost(false)});
+window.addEventListener("keydown",function(e){
+ if(e.key==="ArrowLeft")move(-1);
+ if(e.key==="ArrowRight")move(1);
+ if(e.code==="Space")setBoost(true);
+});
+window.addEventListener("keyup",function(e){if(e.code==="Space")setBoost(false)});
+window.addEventListener("resize",resize);
+
+resize(); reset(); draw();
+})();
+</script>
 </body>
 </html>
