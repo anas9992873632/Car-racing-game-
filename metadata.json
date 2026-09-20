@@ -1,0 +1,6 @@
+{
+  "name": "Turbo Rush Racing",
+  "description": "Mobile-first 3D-style car racing game featuring real-time racing physics, multiple AI opponents, tracks, garage customization, and career progression.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
